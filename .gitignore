@@ -2,8 +2,11 @@
 .vscode/
 __pycache__/
 *.py[cod]
+*.log
 
 frontend/node_modules/
 frontend/dist/
 
 output/
+results.zip
+results_unzipped/

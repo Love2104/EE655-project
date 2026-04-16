@@ -1,14 +1,23 @@
-# Cricket Shot Recognition and Similarity Analysis
+# Cricket Shot Detection
 
-A Streamlit cricket analytics application built around the existing `model_weights.h5` model. It classifies cricket shot videos, compares two batting clips, shows key-frame heatmaps, and generates PDF reports without needing a React or Node.js development server.
+This repository now runs as a Streamlit app for cricket shot recognition and video comparison.
 
-## Start Here
+The current app is centered around:
 
-Run these commands from the project folder:
+- `app.py` for the Streamlit interface
+- `cricket_notebook_model.py` for notebook-style inference and report generation
+- `requirements.txt` for Python dependencies
 
-```text
-E:\SEM 6\New folder (2)\Group project
-```
+## Features
+
+- Upload one video and classify the cricket shot
+- Upload two videos and compare similarity
+- Preview common video formats in the portal
+- Show AVI uploads with a browser-safe animated preview
+- View top predictions, timeline confidence, sampled frames, and report summaries
+- Download PDF and JSON reports
+
+## Run Locally
 
 ```powershell
 python -m venv .venv
@@ -17,99 +26,25 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Streamlit will print a local URL, usually:
+The app usually opens at `http://localhost:8501`.
 
-```text
-http://localhost:8501
-```
+## Model Assets
 
-Open that URL in your browser.
+The Streamlit app expects notebook checkpoint files and result CSVs at runtime, typically under:
 
-## Use the App
+- `results_unzipped/checkpoints/`
+- `results_unzipped/results/`
 
-1. Upload one cricket shot video to classify the shot.
-2. Upload two videos to compare batting similarity.
-3. Click `Run Analysis` or `Run Comparison`.
-4. View confidence, top predictions, timeline, key frames, heatmaps, and similarity score.
-5. Click `Download PDF Report` after results appear.
+Those large generated assets are intentionally not included in this Git push.
 
-The first run can take some time because TensorFlow loads the EfficientNetB0 + GRU model and reads `model_weights.h5`.
+## Test Clip
 
-## Features
+The local smoke test used:
 
-- Single-video cricket shot classification
-- Two-video similarity comparison
-- Video preview before processing
-- Predicted shot type with confidence
-- Top-3 predictions and full probability breakdown
-- Frame-wise timeline analysis
-- Key frames with optional saliency heatmap overlays
-- Similarity percentage for two uploaded videos
-- Downloadable PDF report
-- Recent-session history in Streamlit session state
-
-## Tech Stack
-
-- Streamlit
-- TensorFlow / Keras
-- OpenCV
-- Pandas
-- ReportLab
-- FastAPI service modules reused for inference logic
-
-## Folder Structure
-
-```text
-.
-|-- app.py
-|-- backend
-|   `-- app
-|       |-- __init__.py
-|       |-- main.py
-|       |-- schemas.py
-|       `-- services.py
-|-- frontend
-|   `-- ...
-|-- model_weights.h5
-|-- requirements.txt
-`-- README.md
-```
-
-`app.py` is the main UI now. The `frontend/` React code is still present as reference, but it is no longer required to run the project.
-
-## Optional API Server
-
-The FastAPI backend can still be run separately if needed:
-
-```powershell
-python -m uvicorn backend.app.main:app --reload
-```
-
-The API starts on:
-
-```text
-http://127.0.0.1:8000
-```
-
-Useful endpoints:
-
-- `GET /health`
-- `POST /predict`
-- `POST /compare`
-- `POST /report`
-
-## How It Works
-
-1. Save uploaded video temporarily
-2. Extract uniformly sampled frames with OpenCV
-3. Format frames to `224 x 224`
-4. Run the existing EfficientNetB0 + GRU model using `model_weights.h5`
-5. Generate shot classification, probability breakdown, timeline inference, key frames, feature embeddings, and saliency heatmaps
-6. Display the results in Streamlit and generate a PDF report on demand
+- `test/pull_0001.avi`
+- `test/pull_0002.avi`
 
 ## Notes
 
-- The model is not retrained.
-- Existing `model_weights.h5` is used directly.
-- No Node.js install is needed for the Streamlit workflow.
-- Local folders such as `.venv/`, `.vscode/`, `frontend/node_modules/`, and `output/` are ignored by Git.
+- The current working frontend is Streamlit.
+- Large logs and result bundles are ignored in Git to keep the repository lightweight.
