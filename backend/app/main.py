@@ -38,7 +38,7 @@ async def health() -> dict[str, str]:
 async def root() -> dict[str, object]:
     return {
         "message": "Cricket Shot Recognition API is running.",
-        "frontend": "Start the React app and open http://127.0.0.1:5173",
+        "frontend": "Run streamlit run app.py from the project root for the main UI.",
         "endpoints": {
             "health": "/health",
             "predict": "/predict",
