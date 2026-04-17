@@ -1,18 +1,18 @@
-# EE655 Course Project
+# Cricket Shot Detection
 
-## Cricket Shot Detection and Video Similarity Analysis
+Cricket shot classification and video comparison project built for `EE655`.
 
-This repository contains our `EE655` course project on cricket shot classification using deep learning and a Streamlit-based demonstration app. The final working system is based on the notebook:
+The final implementation in this repository is based on the updated notebook:
 
 - `fork-of-cricket-shot-detection (3).ipynb`
 
-The current app and inference pipeline were updated to follow that notebook's logic, checkpoints, sampling strategy experiments, and result summaries.
+That notebook is the main source of truth for the final model pipeline, experiment setup, checkpoints, and result summaries used by the app.
 
-## Project Objective
+## Overview
 
-The goal of this project is to automatically identify the batting shot played in a cricket video clip and to compare two clips for similarity in shot mechanics.
+This project detects the batting shot played in a cricket video and can also compare two clips for similarity.
 
-The project supports classification of 10 cricket shot classes:
+The system supports these shot classes:
 
 - `cover`
 - `defense`
@@ -25,211 +25,56 @@ The project supports classification of 10 cricket shot classes:
 - `straight`
 - `sweep`
 
-## Final Deliverables
+## Final Project Basis
 
-The final project includes:
+The final app and inference flow are aligned with `fork-of-cricket-shot-detection (3).ipynb`.
 
-- a trained notebook-based deep learning pipeline
-- saved PyTorch checkpoints from notebook experiments
-- experiment result CSVs and plots
-- a Streamlit application for demo and evaluation
-- PDF and JSON report export from the app
+This includes:
 
-## Final Project Files
+- notebook-trained checkpoint usage
+- frame sampling strategies from the notebook
+- voting strategies exposed in the app
+- experiment CSV summaries and result plots
+- Streamlit demo for single-video analysis and two-video comparison
 
-Main files used in the final version:
+## Repository Structure
 
 - `fork-of-cricket-shot-detection (3).ipynb`
-  Main source notebook for the final model design and experiments
+  Final updated notebook used as the project reference implementation
 - `app.py`
-  Streamlit frontend for uploading videos, running inference, comparison, and downloading reports
+  Streamlit frontend for uploading videos, viewing predictions, and comparing clips
 - `cricket_notebook_model.py`
-  Inference-side implementation aligned with the notebook checkpoints
+  Inference code that mirrors the notebook logic for sampling, loading checkpoints, and prediction
 - `results_current/`
-  Extracted checkpoints, CSV summaries, confusion matrices, and training curves
-- `results (1).zip`
-  Original result bundle uploaded for this project
+  Extracted checkpoints, result CSV files, and generated notebook outputs used by the app
 - `requirements.txt`
-  Python dependencies
+  Python dependencies needed to run the project
 
-## What We Have Done
+## Method Summary
 
-This project was completed in the following stages:
+The project evaluates multiple components from the notebook pipeline:
 
-1. Data preparation
-   Video clips were organized into 10 cricket shot classes.
-2. Frame extraction and sampling
-   Each video was converted into fixed-size frame sequences using multiple sampling strategies.
-3. Model design
-   We tested EfficientNetB0-based CNN, GRU, and LSTM architectures.
-4. Phase 1 experiment
-   We compared architectures using uniform sampling.
-5. Phase 2 experiment
-   We compared uniform, motion, and hybrid sampling strategies.
-6. Phase 3 experiment
-   We compared prediction aggregation methods such as single, majority, weighted, and temporal voting.
-7. Application development
-   We built a Streamlit app to demonstrate classification and comparison on uploaded videos.
-8. Result integration
-   The app now reads the latest notebook result bundle and uses the updated checkpoints directly.
+- architectures: `CNN Only`, `GRU`, `LSTM`
+- sampling strategies: `uniform`, `motion`, `hybrid`
+- voting strategies: `single`, `majority`, `weighted`
 
-## Methodology
+The frontend now presents these notebook-driven options directly instead of using a separate custom result flow.
 
-### 1. Feature Backbone
+## Features
 
-The final system uses `EfficientNetB0` as the CNN feature extractor.
-
-Why this was chosen:
-
-- strong visual feature extraction
-- lower computational cost than larger backbones
-- suitable for video frame encoding
-
-### 2. Sequence Modeling
-
-We tested three model variants:
-
-- `CNN Only`
-  Frame-level features are averaged over time and passed to a classifier.
-- `GRU`
-  Sequential features are modeled using a bidirectional GRU.
-- `LSTM`
-  Sequential features are modeled using an LSTM.
-
-### 3. Sampling Strategies
-
-We evaluated:
-
-- `uniform`
-  Evenly spaced frames across the clip
-- `motion`
-  Frames selected from high-motion regions with local context
-- `hybrid`
-  Combination of motion-based, uniform, and random frame selection
-
-### 4. Aggregation Strategies
-
-We evaluated:
-
-- `single`
-  One direct clip prediction
-- `majority`
-  Majority voting across predictions
-- `weighted`
-  Motion-weighted probability aggregation
-- `temporal`
-  Sliding-window temporal averaging
-
-## Experimental Results
-
-### Phase 1: Architecture Comparison
-
-Results from `results_current/results/phase1.csv`:
-
-| Architecture | Validation Accuracy (%) | Test Accuracy (%) | Test Macro-F1 | Overfitting Gap (%) | Epochs |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| CNN Only | 79.51 | 79.02 | 0.7838 | 16.23 | 13 |
-| GRU | 71.71 | 74.15 | 0.7370 | 27.87 | 15 |
-| LSTM | 67.80 | 73.66 | 0.7250 | 30.27 | 13 |
-
-Best architecture from notebook experiments:
-
-- `CNN Only`
-
-### Phase 2: Sampling Strategy Comparison
-
-Results from `results_current/results/phase2_corrected.csv`:
-
-| Sampling | Validation Accuracy (%) | Test Accuracy (%) | Test Macro-F1 | Overfitting Gap (%) | Epochs |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Uniform | 71.71 | 74.15 | 0.7370 | 27.87 | 15 |
-| Hybrid | 62.93 | 62.44 | 0.6203 | 32.60 | 15 |
-| Motion | 57.56 | 57.07 | 0.5725 | 34.38 | 15 |
-
-Best sampling strategy from notebook experiments:
-
-- `Uniform`
-
-### Phase 3: Aggregation Strategy Comparison
-
-Computed from `results_current/results/phase3.csv`:
-
-| Method | Accuracy (%) | Average Confidence (%) | Average Entropy |
-| --- | ---: | ---: | ---: |
-| Majority | 80.00 | 100.00 | ~0.0000 |
-| Single | 80.00 | 96.99 | 0.0848 |
-| Weighted | 62.00 | 87.81 | 0.2824 |
-| Temporal | 56.00 | 50.83 | 1.2607 |
-
-Important note:
-
-- the best notebook setup for model selection is `CNN Only + Uniform`
-- majority voting is a useful aggregation result from phase 3, but it is not the architecture/sampling selection result
-
-## Final Interpretation
-
-Based on the notebook experiments:
-
-- `CNN Only` achieved the best test accuracy among architectures
-- `Uniform sampling` performed better than motion and hybrid sampling
-- `Majority` and `Single` voting both reached `80%` accuracy in phase 3
-- `CNN Only` also showed the smallest overfitting gap, so it is the most stable model among the tested options
-
-## Efficiency and Practical Performance
-
-### Model Efficiency
-
-The final solution is efficient in the following ways:
-
-- EfficientNetB0 is lighter than many larger CNN backbones
-- notebook checkpoints are loaded directly without retraining
-- Streamlit app performs inference on uploaded clips in a simple demo pipeline
-- no separate backend server is required for the final demo
-
-### Accuracy Efficiency
-
-The final model gives a good balance of:
-
-- test accuracy
-- lower overfitting
-- manageable inference cost
-
-For this project, `CNN Only + Uniform` is the most efficient overall choice because it gave the best architecture accuracy while keeping the pipeline simpler than recurrent alternatives.
-
-### Runtime Expectation
-
-Practical timing depends on machine, CPU/GPU, and video length. For the current demo app:
-
-- app startup: usually `5 to 15 seconds`
-- single short clip inference: usually `3 to 15 seconds`
-- two-clip comparison: usually `6 to 30 seconds`
-
-If full retraining is attempted from the notebook:
-
-- on GPU: typically `tens of minutes to a few hours`
-- on CPU only: can take `several hours` or longer depending on dataset size and hardware
-
-These are practical estimates for demo and course-report discussion, not guaranteed fixed timings.
-
-## Current Application Features
-
-The Streamlit app supports:
-
-- single video shot recognition
-- two-video comparison
-- model selection from available checkpoints
-- sampling strategy selection
-- voting strategy selection
-- confidence timeline visualization
+- cricket shot prediction from a single uploaded video
+- similarity comparison between two uploaded videos
+- checkpoint selection from notebook outputs
+- sampling and voting strategy selection
+- probability breakdown and confidence summary
 - sampled frame preview
 - notebook experiment summary tables
-- downloadable PDF report
-- downloadable JSON report
+- PDF and JSON report download
 - recent session history in the sidebar
 
-## How To Run The Project
+## How To Run
 
-### 1. Create and activate virtual environment
+### 1. Create a virtual environment
 
 ```powershell
 python -m venv .venv
@@ -242,107 +87,33 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 3. Make sure result files are present
+### 3. Make sure notebook results are available
 
-The app expects:
+The app expects one of the following:
 
-- `results (1).zip`
-  or
-- extracted files under `results_current/`
+- extracted outputs under `results_current/`
+- or a results archive that can be extracted by the app on startup
 
-The project is already configured to use the latest result bundle automatically.
-
-### 4. Start the app
+### 4. Start the Streamlit app
 
 ```powershell
 streamlit run app.py
 ```
 
-If `streamlit` is not recognized, use:
+## GitHub Deployment
+
+This repository is ready to be pushed to GitHub as a standard project repo.
+
+Recommended flow:
 
 ```powershell
-.\.venv\Scripts\python.exe -m streamlit run app.py --server.headless true --server.port 8501
+git add app.py README.md "fork-of-cricket-shot-detection (3).ipynb"
+git commit -m "Align app and docs with final notebook pipeline"
+git push origin HEAD
 ```
 
-### 5. Open in browser
+## Important Note
 
-Use any of these:
+For this final version, `fork-of-cricket-shot-detection (3).ipynb` should be treated as the authoritative final code and experiment reference.
 
-- `http://localhost:8501`
-- `http://127.0.0.1:8501`
-
-## Streamlit Community Cloud Deployment
-
-This repository is prepared for deployment on Streamlit Community Cloud with:
-
-- root entrypoint file: `app.py`
-- root dependency file: `requirements.txt`
-- root Streamlit config: `.streamlit/config.toml`
-- bundled model checkpoints and notebook result files inside `results_current/`
-
-Deployment settings to use in Streamlit Community Cloud:
-
-- Repository: `Love2104/EE655-project`
-- Branch: `main`
-- Main file path: `app.py`
-- Python version: `3.10`
-
-Suggested custom app URL:
-
-- `ee655-cricket-shot-detection`
-
-After deployment, the final link will typically be one of:
-
-- `https://ee655-cricket-shot-detection.streamlit.app`
-- or an auto-generated `streamlit.app` URL based on repo and file path
-
-## How To Use The App
-
-1. Open the Streamlit app in the browser.
-2. Choose model, sampling, and voting settings from the sidebar.
-3. Upload one video for shot classification.
-4. Upload two videos if you want shot similarity comparison.
-5. Click `Run Analysis` or `Run Comparison`.
-6. Review prediction, confidence, timeline, sampled frames, and notes.
-7. Download the PDF or JSON report if needed.
-
-## Dependencies
-
-Key libraries used:
-
-- `streamlit`
-- `torch`
-- `torchvision`
-- `opencv-python-headless`
-- `numpy`
-- `pandas`
-- `Pillow`
-- `reportlab`
-
-The current `requirements.txt` also includes some packages from older experiments, but the active Streamlit app mainly depends on the libraries listed above.
-
-## Repository Notes
-
-- the final app is based on the notebook `fork-of-cricket-shot-detection (3).ipynb`
-- older unnecessary local experiment files were cleaned from the working project folder
-- the inference code was updated to match the saved notebook checkpoints exactly
-- the app now reads the extracted notebook result bundle from `results_current/`
-
-## Limitations
-
-- performance depends on the quality and duration of uploaded videos
-- some visually similar shots are still confused with each other
-- retraining is not part of the Streamlit app flow
-- network/external URLs may be blocked by firewall settings on some systems, so `localhost` is the safest option
-
-## Suggested Viva / Report Summary
-
-This project demonstrates that deep learning can be used to classify cricket batting shots from video clips with useful accuracy for academic and demo purposes. Among the tested models, `CNN Only` with `Uniform` frame sampling gave the best and most stable overall result in our notebook experiments. The project was extended into a working Streamlit interface so that users can upload videos, run predictions, compare clips, and generate reports directly from the trained notebook outputs.
-
-## Authors
-
-Update this section with your actual group member names, roll numbers, and department details before final submission.
-
-- `Student 1 - Name / Roll No.`
-- `Student 2 - Name / Roll No.`
-- `Student 3 - Name / Roll No.`
+If there is any wording mismatch between the UI text and older notes, the notebook should be considered correct.

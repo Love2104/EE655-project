@@ -438,31 +438,6 @@ def result_image_path(prefix: str, stem: str) -> Path | None:
     return path if path.exists() else None
 
 
-def compute_best_notebook_result() -> str:
-    phase1 = load_phase_summary("phase1.csv")
-    phase2 = load_phase_summary("phase2.csv")
-
-    best_architecture = "cnn_only"
-    best_sampling = "uniform"
-
-    if not phase1.empty:
-        architecture_col = next((col for col in ["Architecture", "architecture"] if col in phase1.columns), None)
-        accuracy_col = next((col for col in ["Test Acc %", "Test Accuracy %"] if col in phase1.columns), None)
-        if architecture_col and accuracy_col:
-            best_architecture = str(phase1.sort_values(accuracy_col, ascending=False).iloc[0][architecture_col]).lower()
-
-    if not phase2.empty:
-        sampling_col = next((col for col in ["Sampling", "sampling"] if col in phase2.columns), None)
-        accuracy_col = next((col for col in ["Test Acc %", "Test Accuracy %"] if col in phase2.columns), None)
-        if sampling_col and accuracy_col:
-            best_sampling = str(phase2.sort_values(accuracy_col, ascending=False).iloc[0][sampling_col]).lower()
-
-    return (
-        f"Best notebook setup: {MODEL_LABELS.get(best_architecture, best_architecture.upper())} + "
-        f"{SAMPLING_LABELS.get(best_sampling, best_sampling.title())}"
-    )
-
-
 def percent_bar(value: float) -> None:
     safe = max(0.0, min(float(value), 100.0))
     st.markdown(
@@ -747,7 +722,6 @@ def main() -> None:
     init_state()
     discovered_checkpoint = find_checkpoint()
     checkpoint_catalog = discover_checkpoints()
-    best_result_summary = compute_best_notebook_result() if RESULTS_DIR.exists() else "Best result unavailable."
 
     default_architecture = "cnn_only"
     default_sampling = "uniform"
@@ -795,8 +769,6 @@ def main() -> None:
         else:
             st.warning("Selected combination is not available in the checkpoint folder.")
 
-        st.markdown("#### Best Notebook Result")
-        st.success(best_result_summary)
         st.markdown("#### Recent Sessions")
         if not st.session_state.history:
             st.caption("Run an analysis once and it will appear here.")
@@ -817,8 +789,8 @@ def main() -> None:
             <h1>Cricket Shot Detection</h1>
             <p>
                 Upload one video for recognition or two videos for similarity comparison. This app now follows
-                the updated notebook pipeline from <strong>fork-of-cricket-shot-detection (3).ipynb</strong>
-                and uses its checkpoints, sampling strategies, voting methods, and result summaries.
+                the final pipeline defined in <strong>fork-of-cricket-shot-detection (3).ipynb</strong>
+                and uses that notebook's checkpoints, sampling strategies, voting methods, and experiment outputs.
             </p>
         </div>
         """,
