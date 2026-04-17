@@ -24,6 +24,14 @@ VOTING_OPTIONS = ["single", "majority", "weighted"]
 PROJECT_ROOT = Path(__file__).resolve().parent
 RESULTS_EXTRACT_DIR = PROJECT_ROOT / "results_current"
 HISTORY_FILE = PROJECT_ROOT / "recent_sessions.json"
+PHASE3_NOTEBOOK_ARCHITECTURE = "gru"
+PHASE3_NOTEBOOK_SAMPLING = "uniform"
+VOTING_TIE_BREAK = {
+    "single": 0,
+    "majority": 1,
+    "weighted": 2,
+    "temporal": 3,
+}
 MODEL_LABELS = {
     "cnn_only": "CNN Only",
     "gru": "GRU",
@@ -67,6 +75,11 @@ def prepare_results_root() -> Path:
         os.utime(RESULTS_EXTRACT_DIR, (archive.stat().st_mtime, archive.stat().st_mtime))
 
     return RESULTS_EXTRACT_DIR
+
+
+def locate_latest_notebook() -> Path | None:
+    notebooks = sorted(PROJECT_ROOT.glob("*.ipynb"), key=lambda path: path.stat().st_mtime, reverse=True)
+    return notebooks[0] if notebooks else None
 
 
 RESULTS_ROOT = prepare_results_root()
@@ -433,6 +446,56 @@ def available_samplings(catalog: list[dict[str, str]], architecture: str) -> lis
     return [value for value in SAMPLING_OPTIONS if value in values] or ["uniform"]
 
 
+def compute_best_runtime_preset(catalog: list[dict[str, str]]) -> dict[str, Any]:
+    preset = {
+        "architecture": "cnn_only",
+        "sampling": "uniform",
+        "voting": "single",
+        "accuracy": None,
+        "source": "Phase 1 / Phase 2 notebook results",
+    }
+
+    phase3 = load_phase_summary("phase3.csv")
+    phase3_checkpoint = get_selected_checkpoint(catalog, PHASE3_NOTEBOOK_ARCHITECTURE, PHASE3_NOTEBOOK_SAMPLING)
+    if not phase3.empty and phase3_checkpoint is not None and {"method", "correct"}.issubset(phase3.columns):
+        phase3_summary = (
+            phase3.groupby("method", as_index=False)
+            .agg(accuracy=("correct", "mean"))
+            .assign(priority=lambda df: df["method"].map(lambda value: VOTING_TIE_BREAK.get(str(value), 99)))
+            .sort_values(["accuracy", "priority"], ascending=[False, True], ignore_index=True)
+        )
+        if not phase3_summary.empty:
+            best_row = phase3_summary.iloc[0]
+            preset.update(
+                {
+                    "architecture": PHASE3_NOTEBOOK_ARCHITECTURE,
+                    "sampling": PHASE3_NOTEBOOK_SAMPLING,
+                    "voting": str(best_row["method"]),
+                    "accuracy": round(float(best_row["accuracy"]) * 100.0, 2),
+                    "source": "Phase 3 notebook results",
+                }
+            )
+            return preset
+
+    phase1 = load_phase_summary("phase1.csv")
+    if not phase1.empty and {"Architecture", "Test Acc %"}.issubset(phase1.columns):
+        ranked_phase1 = phase1.sort_values("Test Acc %", ascending=False, ignore_index=True)
+        for _, row in ranked_phase1.iterrows():
+            architecture = str(row["Architecture"]).lower()
+            checkpoint = get_selected_checkpoint(catalog, architecture, "uniform")
+            if checkpoint is not None:
+                preset.update(
+                    {
+                        "architecture": architecture,
+                        "sampling": "uniform",
+                        "accuracy": round(float(row["Test Acc %"]), 2),
+                    }
+                )
+                break
+
+    return preset
+
+
 def result_image_path(prefix: str, stem: str) -> Path | None:
     path = RESULTS_DIR / f"{prefix}_{stem}.png"
     return path if path.exists() else None
@@ -720,19 +783,37 @@ def render_download_buttons(result: dict[str, Any], mode: str) -> None:
 
 def main() -> None:
     init_state()
+    latest_notebook = locate_latest_notebook()
     discovered_checkpoint = find_checkpoint()
     checkpoint_catalog = discover_checkpoints()
+    best_preset = compute_best_runtime_preset(checkpoint_catalog)
 
-    default_architecture = "cnn_only"
-    default_sampling = "uniform"
+    default_architecture = str(best_preset["architecture"])
+    default_sampling = str(best_preset["sampling"])
+    default_voting = str(best_preset["voting"])
     if discovered_checkpoint:
         lowered = discovered_checkpoint.stem.lower()
-        default_architecture = "gru" if "gru" in lowered else "lstm" if "lstm" in lowered else "cnn_only"
-        default_sampling = "motion" if "motion" in lowered else "hybrid" if "hybrid" in lowered else "uniform"
+        fallback_architecture = "gru" if "gru" in lowered else "lstm" if "lstm" in lowered else "cnn_only"
+        fallback_sampling = "motion" if "motion" in lowered else "hybrid" if "hybrid" in lowered else "uniform"
+        if get_selected_checkpoint(checkpoint_catalog, default_architecture, default_sampling) is None:
+            default_architecture = fallback_architecture
+            default_sampling = fallback_sampling
+            default_voting = "single"
 
     with st.sidebar:
         st.title("Model Controls")
-        st.write("Choose the checkpoint setup you want to run.")
+        st.write("The strongest notebook-backed preset is preselected below.")
+        if latest_notebook:
+            st.caption(f"Notebook source: {latest_notebook.name}")
+        best_summary = (
+            f"Best preset from {best_preset['source']}: "
+            f"{MODEL_LABELS.get(default_architecture, default_architecture.upper())} + "
+            f"{SAMPLING_LABELS.get(default_sampling, default_sampling.title())} + "
+            f"{VOTING_LABELS.get(default_voting, default_voting.title())}"
+        )
+        if best_preset["accuracy"] is not None:
+            best_summary += f" ({best_preset['accuracy']:.2f}% accuracy)"
+        st.success(best_summary)
 
         architecture_options = [
             arch for arch in ["cnn_only", "gru", "lstm"] if any(cp["architecture"] == arch for cp in checkpoint_catalog)
@@ -758,7 +839,7 @@ def main() -> None:
         voting_strategy = st.selectbox(
             "Voting Strategy",
             VOTING_OPTIONS,
-            index=0,
+            index=VOTING_OPTIONS.index(default_voting) if default_voting in VOTING_OPTIONS else 0,
             format_func=lambda value: VOTING_LABELS.get(value, value.title()),
         )
 
@@ -789,11 +870,11 @@ def main() -> None:
             <h1>Cricket Shot Detection</h1>
             <p>
                 Upload one video for recognition or two videos for similarity comparison. This app now follows
-                the final pipeline defined in <strong>fork-of-cricket-shot-detection (3).ipynb</strong>
-                and uses that notebook's checkpoints, sampling strategies, voting methods, and experiment outputs.
+                the latest notebook pipeline from <strong>{latest_notebook_name}</strong>
+                and preloads the best available no-training setup from the saved notebook results.
             </p>
         </div>
-        """,
+        """.format(latest_notebook_name=latest_notebook.name if latest_notebook else "the notebook file"),
         unsafe_allow_html=True,
     )
 

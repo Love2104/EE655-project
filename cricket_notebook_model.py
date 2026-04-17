@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import io
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -371,40 +370,53 @@ def _window_indices(frame_count: int, n_frames: int, windows: int = 6) -> list[t
     return [(start, start + n_frames) for start in starts]
 
 
+def _predict_probabilities(bundle: NotebookModelBundle, frames: list[np.ndarray]) -> np.ndarray:
+    tensor = frames_to_tensor(frames, bundle.transform)
+    return torch.softmax(bundle.model(tensor), dim=1).squeeze(0).cpu().numpy()
+
+
 def _aggregate_probabilities(
+    frames: list[np.ndarray],
+    bundle: NotebookModelBundle,
     single_probabilities: np.ndarray,
-    windows: list[dict[str, float | int | np.ndarray]],
     voting_strategy: str,
 ) -> tuple[np.ndarray, dict[str, float]]:
-    if voting_strategy == "single" or not windows:
+    if voting_strategy == "single":
         return single_probabilities, {"source": "single_clip"}
 
     if voting_strategy == "majority":
-        labels = [int(window["label_index"]) for window in windows]
-        counts = Counter(labels)
-        ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-        total = max(len(windows), 1)
-        vote_distribution = np.zeros(len(CLASSES), dtype=np.float32)
-        for label_index, count in ordered:
-            vote_distribution[label_index] = count / total
-        combined = (0.7 * vote_distribution) + (0.3 * single_probabilities.astype(np.float32))
-        return combined, {"source": "majority_vote"}
+        votes = np.zeros(len(CLASSES), dtype=np.float32)
+        for _ in range(5):
+            sampled = sample_frames(frames, NUM_FRAMES, bundle.strategy)
+            probabilities = _predict_probabilities(bundle, sampled[:NUM_FRAMES])
+            votes[int(np.argmax(probabilities))] += 1.0
+        total_votes = float(votes.sum())
+        if total_votes <= 0:
+            return single_probabilities, {"source": "single_clip"}
+        return votes / total_votes, {"source": "majority_vote"}
 
     if voting_strategy == "weighted":
+        scores = compute_motion_scores(frames)
         weighted_sum = np.zeros(len(CLASSES), dtype=np.float32)
         total_weight = 0.0
-        for window in windows:
-            probabilities = np.array(window["probabilities"], dtype=np.float32)
-            entropy = float(window["entropy"])
-            normalized_entropy = entropy / np.log(len(CLASSES))
-            weight = max(0.05, 1.0 - normalized_entropy)
-            weighted_sum += probabilities * weight
+        for _ in range(5):
+            top_n = min(len(frames), max(NUM_FRAMES, int(NUM_FRAMES * 1.5)))
+            if top_n <= 0:
+                continue
+            chosen_pool = np.argsort(scores)[-top_n:]
+            sample_size = min(NUM_FRAMES, len(chosen_pool))
+            if sample_size <= 0:
+                continue
+            chosen = np.sort(np.random.choice(chosen_pool, size=sample_size, replace=False))
+            sampled = [frames[index] for index in chosen]
+            while len(sampled) < NUM_FRAMES:
+                sampled.append(sampled[-1])
+            weight = float(scores[chosen].mean() + 1e-6)
+            weighted_sum += weight * _predict_probabilities(bundle, sampled[:NUM_FRAMES])
             total_weight += weight
-        if total_weight == 0:
+        if total_weight <= 0:
             return single_probabilities, {"source": "single_clip"}
-        window_distribution = weighted_sum / total_weight
-        combined = (0.55 * window_distribution) + (0.45 * single_probabilities.astype(np.float32))
-        return combined, {"source": "weighted_vote"}
+        return weighted_sum / total_weight, {"source": "weighted_vote"}
 
     raise ValueError(f"Unknown voting strategy: {voting_strategy}")
 
@@ -446,7 +458,7 @@ def analyze_video(video_path: str | Path, bundle: NotebookModelBundle, voting_st
             }
         )
 
-    final_probabilities, voting_meta = _aggregate_probabilities(single_probabilities, windows, voting_strategy)
+    final_probabilities, voting_meta = _aggregate_probabilities(frames, bundle, single_probabilities, voting_strategy)
     ordered = np.argsort(final_probabilities)[::-1]
     top_predictions = [
         {"label": CLASSES[index], "probability": round(float(final_probabilities[index] * 100), 2)}
