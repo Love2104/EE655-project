@@ -271,6 +271,31 @@ Use any of these:
 - `http://localhost:8501`
 - `http://127.0.0.1:8501`
 
+## Streamlit Community Cloud Deployment
+
+This repository is prepared for deployment on Streamlit Community Cloud with:
+
+- root entrypoint file: `app.py`
+- root dependency file: `requirements.txt`
+- root Streamlit config: `.streamlit/config.toml`
+- bundled model checkpoints and notebook result files inside `results_current/`
+
+Deployment settings to use in Streamlit Community Cloud:
+
+- Repository: `Love2104/EE655-project`
+- Branch: `main`
+- Main file path: `app.py`
+- Python version: `3.10`
+
+Suggested custom app URL:
+
+- `ee655-cricket-shot-detection`
+
+After deployment, the final link will typically be one of:
+
+- `https://ee655-cricket-shot-detection.streamlit.app`
+- or an auto-generated `streamlit.app` URL based on repo and file path
+
 ## How To Use The App
 
 1. Open the Streamlit app in the browser.
@@ -321,4 +346,3 @@ Update this section with your actual group member names, roll numbers, and depar
 - `Student 1 - Name / Roll No.`
 - `Student 2 - Name / Roll No.`
 - `Student 3 - Name / Roll No.`
-
