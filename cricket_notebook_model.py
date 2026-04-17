@@ -32,11 +32,14 @@ CLASSES = [
 ]
 FRAME_SIZE = (224, 224)
 NUM_FRAMES = 16
+NUM_CLASSES = len(CLASSES)
+HIDDEN_SIZE = 256
+DROPOUT = 0.65
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_CHECKPOINT_CANDIDATES = [
-    PROJECT_ROOT / "results_unzipped" / "checkpoints" / "p1_cnn_only.pth",
-    PROJECT_ROOT / "results_unzipped" / "checkpoints" / "p1_gru.pth",
+    PROJECT_ROOT / "results_current" / "checkpoints" / "p1_cnn_only.pth",
+    PROJECT_ROOT / "results_current" / "checkpoints" / "p1_gru.pth",
     PROJECT_ROOT / "checkpoints" / "p1_cnn_only.pth",
 ]
 
@@ -100,7 +103,25 @@ def motion_sampling(frames: list[np.ndarray], n: int) -> list[np.ndarray]:
         return [np.zeros((*FRAME_SIZE, 3), dtype=np.uint8)] * n
     if len(frames) <= n:
         return frames + [frames[-1]] * (n - len(frames))
-    return [frames[i] for i in np.sort(np.argsort(compute_motion_scores(frames))[-n:])]
+
+    scores = compute_motion_scores(frames)
+    top_n = min(n, len(frames))
+    top_indices = set(np.argsort(scores)[-top_n:])
+
+    context_indices = set()
+    for idx in top_indices:
+        for offset in (-3, -2, -1, 1, 2, 3):
+            neighbor = idx + offset
+            if 0 <= neighbor < len(frames):
+                context_indices.add(neighbor)
+
+    all_indices = top_indices | context_indices
+    if len(all_indices) < n:
+        remaining = n - len(all_indices)
+        all_indices |= set(np.linspace(0, len(frames) - 1, remaining, dtype=int))
+
+    result_indices = sorted(all_indices)[:n]
+    return [frames[i] for i in result_indices]
 
 
 def hybrid_sampling(frames: list[np.ndarray], n: int) -> list[np.ndarray]:
@@ -108,12 +129,32 @@ def hybrid_sampling(frames: list[np.ndarray], n: int) -> list[np.ndarray]:
         return [np.zeros((*FRAME_SIZE, 3), dtype=np.uint8)] * n
     if len(frames) <= n:
         return frames + [frames[-1]] * (n - len(frames))
-    uniform = set(np.linspace(0, len(frames) - 1, n // 2, dtype=int))
-    motion = set(np.argsort(compute_motion_scores(frames))[-(n - n // 2) :])
-    combined = sorted(uniform | motion)
-    if len(combined) < n:
-        combined = sorted(set(combined) | set(np.linspace(0, len(frames) - 1, n, dtype=int)))
-    return [frames[i] for i in combined[:n]]
+
+    motion_n = int(n * 0.4)
+    uniform_n = int(n * 0.4)
+    random_n = n - motion_n - uniform_n
+    scores = compute_motion_scores(frames)
+
+    motion_indices = set(np.argsort(scores)[-motion_n:])
+    context_indices = set()
+    for idx in motion_indices:
+        for offset in (-2, -1, 1, 2):
+            neighbor = idx + offset
+            if 0 <= neighbor < len(frames):
+                context_indices.add(neighbor)
+    motion_indices |= context_indices
+
+    uniform_indices = set(np.linspace(0, len(frames) - 1, uniform_n, dtype=int))
+    remaining_indices = [i for i in range(len(frames)) if i not in motion_indices and i not in uniform_indices]
+    random_indices: set[int] = set()
+    if remaining_indices and random_n > 0:
+        random_indices = set(np.random.choice(remaining_indices, min(random_n, len(remaining_indices)), replace=False))
+
+    all_indices = sorted(motion_indices | uniform_indices | random_indices)
+    while len(all_indices) < n:
+        all_indices.append(all_indices[-1])
+
+    return [frames[i] for i in all_indices[:n]]
 
 
 def sample_frames(frames: list[np.ndarray], n: int, strategy: str) -> list[np.ndarray]:
@@ -138,7 +179,7 @@ def build_transform() -> transforms.Compose:
 
 
 class EfficientEncoder(nn.Module):
-    def __init__(self, fine_tune_blocks: int = 3):
+    def __init__(self, fine_tune_blocks: int = 3, freeze_bn: bool = False):
         super().__init__()
         base = models.efficientnet_b0(weights=None)
 
@@ -150,8 +191,16 @@ class EfficientEncoder(nn.Module):
             for p in block.parameters():
                 p.requires_grad = True
 
+        if freeze_bn:
+            for module in base.modules():
+                if isinstance(module, nn.BatchNorm2d):
+                    module.eval()
+                    for p in module.parameters():
+                        p.requires_grad = False
+
         self.features = base.features
         self.pool = nn.AdaptiveAvgPool2d(1)
+        self.out_dim = 1280
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
@@ -161,13 +210,20 @@ class EfficientEncoder(nn.Module):
 class CricketLSTM(nn.Module):
     def __init__(self):
         super().__init__()
-        self.cnn = EfficientEncoder(fine_tune_blocks=3)
-        self.lstm = nn.LSTM(input_size=1280, hidden_size=256, num_layers=2, batch_first=True, dropout=0.3)
+        self.cnn = EfficientEncoder(fine_tune_blocks=2, freeze_bn=True)
+        self.lstm = nn.LSTM(
+            input_size=1280,
+            hidden_size=HIDDEN_SIZE,
+            num_layers=1,
+            batch_first=True,
+            dropout=0.0,
+            bidirectional=False,
+        )
         self.head = nn.Sequential(
-            nn.Linear(256, 1024),
+            nn.Linear(HIDDEN_SIZE, 512),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(1024, len(CLASSES)),
+            nn.Dropout(DROPOUT),
+            nn.Linear(512, NUM_CLASSES),
         )
 
     def _extract_sequence(self, x: torch.Tensor) -> torch.Tensor:
@@ -188,14 +244,20 @@ class CricketLSTM(nn.Module):
 class CricketGRU(nn.Module):
     def __init__(self):
         super().__init__()
-        self.cnn = EfficientEncoder(fine_tune_blocks=3)
-        self.gru1 = nn.GRU(1280, 256, batch_first=True)
-        self.gru2 = nn.GRU(256, 128, batch_first=True)
+        self.cnn = EfficientEncoder(fine_tune_blocks=2, freeze_bn=True)
+        self.gru = nn.GRU(
+            input_size=1280,
+            hidden_size=HIDDEN_SIZE,
+            num_layers=2,
+            batch_first=True,
+            dropout=0.5,
+            bidirectional=True,
+        )
         self.head = nn.Sequential(
-            nn.Linear(128, 1024),
+            nn.Linear(HIDDEN_SIZE * 2, 512),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(1024, len(CLASSES)),
+            nn.Dropout(DROPOUT),
+            nn.Linear(512, NUM_CLASSES),
         )
 
     def _extract_sequence(self, x: torch.Tensor) -> torch.Tensor:
@@ -204,15 +266,13 @@ class CricketGRU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         seq = self._extract_sequence(x)
-        out, _ = self.gru1(seq)
-        out, _ = self.gru2(out)
-        return self.head(out[:, -1])
+        out, _ = self.gru(seq)
+        return self.head(out.mean(dim=1))
 
     def sequence_features(self, x: torch.Tensor) -> torch.Tensor:
         seq = self._extract_sequence(x)
-        out, _ = self.gru1(seq)
-        out, _ = self.gru2(out)
-        return out[:, -1]
+        out, _ = self.gru(seq)
+        return out.mean(dim=1)
 
 
 class CNNOnly(nn.Module):
@@ -220,10 +280,10 @@ class CNNOnly(nn.Module):
         super().__init__()
         self.cnn = EfficientEncoder(fine_tune_blocks=3)
         self.head = nn.Sequential(
-            nn.Linear(1280, 1024),
+            nn.Linear(1280, 512),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(1024, len(CLASSES)),
+            nn.Dropout(DROPOUT),
+            nn.Linear(512, NUM_CLASSES),
         )
 
     def _extract_sequence(self, x: torch.Tensor) -> torch.Tensor:

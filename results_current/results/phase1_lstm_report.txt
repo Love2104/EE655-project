@@ -1,0 +1,6 @@
+Architecture: lstm
+Best val accuracy: 67.80%
+Test accuracy: 73.66%
+Test macro F1: 0.7250
+Best epoch: 13
+Overfitting gap: 30.27%

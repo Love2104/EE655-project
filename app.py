@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,8 +21,9 @@ from cricket_notebook_model import analyze_video, compare_analyses, create_pdf_r
 SUPPORTED_TYPES = ["mp4", "avi", "mov", "mkv"]
 SAMPLING_OPTIONS = ["uniform", "motion", "hybrid"]
 VOTING_OPTIONS = ["single", "majority", "weighted"]
-RESULTS_DIR = Path("results_unzipped") / "results"
-CHECKPOINT_DIR = Path("results_unzipped") / "checkpoints"
+PROJECT_ROOT = Path(__file__).resolve().parent
+RESULTS_EXTRACT_DIR = PROJECT_ROOT / "results_current"
+HISTORY_FILE = PROJECT_ROOT / "recent_sessions.json"
 MODEL_LABELS = {
     "cnn_only": "CNN Only",
     "gru": "GRU",
@@ -36,6 +39,39 @@ VOTING_LABELS = {
     "majority": "Majority Voting",
     "weighted": "Weighted Voting",
 }
+
+
+def locate_latest_results_archive() -> Path | None:
+    archives = sorted(
+        [path for path in PROJECT_ROOT.glob("*.zip") if "result" in path.stem.lower()],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    return archives[0] if archives else None
+
+
+def prepare_results_root() -> Path:
+    archive = locate_latest_results_archive()
+    if archive is None and RESULTS_EXTRACT_DIR.exists():
+        return RESULTS_EXTRACT_DIR
+    if archive is None:
+        return RESULTS_EXTRACT_DIR
+
+    needs_refresh = not RESULTS_EXTRACT_DIR.exists() or archive.stat().st_mtime > RESULTS_EXTRACT_DIR.stat().st_mtime
+    if needs_refresh:
+        if RESULTS_EXTRACT_DIR.exists():
+            shutil.rmtree(RESULTS_EXTRACT_DIR)
+        RESULTS_EXTRACT_DIR.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(RESULTS_EXTRACT_DIR)
+        os.utime(RESULTS_EXTRACT_DIR, (archive.stat().st_mtime, archive.stat().st_mtime))
+
+    return RESULTS_EXTRACT_DIR
+
+
+RESULTS_ROOT = prepare_results_root()
+RESULTS_DIR = RESULTS_ROOT / "results"
+CHECKPOINT_DIR = RESULTS_ROOT / "checkpoints"
 
 
 st.set_page_config(page_title="Cricket Shot Detection", layout="wide", initial_sidebar_state="expanded")
@@ -174,6 +210,17 @@ st.markdown(
     section[data-testid="stSidebar"] .stSelectbox > div[data-baseweb="select"] > div:hover {
         border-color: #b8c4d0 !important;
     }
+    section[data-testid="stSidebar"] .stButton > button {
+        background: #ffffff !important;
+        color: var(--text) !important;
+        border: 1px solid var(--border) !important;
+        text-align: left;
+        min-height: 3.2rem;
+        white-space: normal;
+    }
+    section[data-testid="stSidebar"] .stButton > button * {
+        color: var(--text) !important;
+    }
     div[data-testid="stMetric"] {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -233,7 +280,22 @@ st.markdown(
 def init_state() -> None:
     st.session_state.setdefault("single_result", None)
     st.session_state.setdefault("compare_result", None)
-    st.session_state.setdefault("history", [])
+    if "history" not in st.session_state:
+        st.session_state.history = load_history()
+
+
+def load_history() -> list[dict[str, Any]]:
+    if not HISTORY_FILE.exists():
+        return []
+    try:
+        data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def save_history(items: list[dict[str, Any]]) -> None:
+    HISTORY_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
 
 def save_upload(uploaded_file: Any) -> str:
@@ -323,7 +385,12 @@ def get_bundle(checkpoint_path: str, strategy: str):
 
 @st.cache_data(show_spinner=False)
 def load_phase_summary(csv_name: str) -> pd.DataFrame:
-    return pd.read_csv(RESULTS_DIR / csv_name)
+    path = RESULTS_DIR / csv_name
+    if not path.exists() and csv_name == "phase2.csv":
+        fallback = RESULTS_DIR / "phase2_corrected.csv"
+        if fallback.exists():
+            path = fallback
+    return pd.read_csv(path)
 
 
 @st.cache_data(show_spinner=False)
@@ -369,6 +436,31 @@ def available_samplings(catalog: list[dict[str, str]], architecture: str) -> lis
 def result_image_path(prefix: str, stem: str) -> Path | None:
     path = RESULTS_DIR / f"{prefix}_{stem}.png"
     return path if path.exists() else None
+
+
+def compute_best_notebook_result() -> str:
+    phase1 = load_phase_summary("phase1.csv")
+    phase2 = load_phase_summary("phase2.csv")
+
+    best_architecture = "cnn_only"
+    best_sampling = "uniform"
+
+    if not phase1.empty:
+        architecture_col = next((col for col in ["Architecture", "architecture"] if col in phase1.columns), None)
+        accuracy_col = next((col for col in ["Test Acc %", "Test Accuracy %"] if col in phase1.columns), None)
+        if architecture_col and accuracy_col:
+            best_architecture = str(phase1.sort_values(accuracy_col, ascending=False).iloc[0][architecture_col]).lower()
+
+    if not phase2.empty:
+        sampling_col = next((col for col in ["Sampling", "sampling"] if col in phase2.columns), None)
+        accuracy_col = next((col for col in ["Test Acc %", "Test Accuracy %"] if col in phase2.columns), None)
+        if sampling_col and accuracy_col:
+            best_sampling = str(phase2.sort_values(accuracy_col, ascending=False).iloc[0][sampling_col]).lower()
+
+    return (
+        f"Best notebook setup: {MODEL_LABELS.get(best_architecture, best_architecture.upper())} + "
+        f"{SAMPLING_LABELS.get(best_sampling, best_sampling.title())}"
+    )
 
 
 def percent_bar(value: float) -> None:
@@ -444,7 +536,17 @@ def add_history(mode: str, payload: dict[str, Any]) -> None:
             "subtitle": f"{payload['prediction']['confidence']:.2f}% confidence",
             "data": payload,
         }
-    st.session_state.history = [item, *st.session_state.history[:5]]
+    deduped = [
+        existing
+        for existing in st.session_state.history
+        if not (
+            existing.get("mode") == item["mode"]
+            and existing.get("title") == item["title"]
+            and existing.get("subtitle") == item["subtitle"]
+        )
+    ]
+    st.session_state.history = [item, *deduped[:7]]
+    save_history(st.session_state.history)
 
 
 def render_experiment_summary(selected_checkpoint: dict[str, str] | None) -> None:
@@ -645,6 +747,7 @@ def main() -> None:
     init_state()
     discovered_checkpoint = find_checkpoint()
     checkpoint_catalog = discover_checkpoints()
+    best_result_summary = compute_best_notebook_result() if RESULTS_DIR.exists() else "Best result unavailable."
 
     default_architecture = "cnn_only"
     default_sampling = "uniform"
@@ -660,6 +763,9 @@ def main() -> None:
         architecture_options = [
             arch for arch in ["cnn_only", "gru", "lstm"] if any(cp["architecture"] == arch for cp in checkpoint_catalog)
         ]
+        if not architecture_options:
+            st.error("No checkpoints were found in the updated results bundle.")
+            return
         architecture = st.selectbox(
             "Model",
             architecture_options,
@@ -690,10 +796,13 @@ def main() -> None:
             st.warning("Selected combination is not available in the checkpoint folder.")
 
         st.markdown("#### Best Notebook Result")
-        st.success("Best result: CNN Only + Uniform + Single Clip")
+        st.success(best_result_summary)
         st.markdown("#### Recent Sessions")
+        if not st.session_state.history:
+            st.caption("Run an analysis once and it will appear here.")
         for idx, item in enumerate(st.session_state.history):
-            if st.button(f"{item['mode']}: {item['title']}", key=f"history_{idx}", use_container_width=True):
+            button_label = f"{item['mode']}: {item['title']} ({item['subtitle']})"
+            if st.button(button_label, key=f"history_{idx}", use_container_width=True):
                 if item["mode"] == "Compare":
                     st.session_state.compare_result = item["data"]
                     st.session_state.single_result = None
@@ -707,9 +816,9 @@ def main() -> None:
         <div class="hero">
             <h1>Cricket Shot Detection</h1>
             <p>
-                Upload one video for recognition or two videos for similarity comparison. This version includes
-                direct model selection, sampling selection, voting strategy selection, better notebook figures,
-                and full report downloads from the frontend.
+                Upload one video for recognition or two videos for similarity comparison. This app now follows
+                the updated notebook pipeline from <strong>fork-of-cricket-shot-detection (3).ipynb</strong>
+                and uses its checkpoints, sampling strategies, voting methods, and result summaries.
             </p>
         </div>
         """,

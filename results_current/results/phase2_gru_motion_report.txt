@@ -1,0 +1,7 @@
+Architecture: GRU
+Sampling strategy: motion
+Best val accuracy: 57.56%
+Test accuracy: 57.07%
+Test macro F1: 0.5725
+Best epoch: 15
+Overfitting gap: 34.38%

@@ -10,3 +10,7 @@ frontend/dist/
 output/
 results.zip
 results_unzipped/
+results (1).zip
+recent_sessions.json
+streamlit.stdout.log
+streamlit.stderr.log

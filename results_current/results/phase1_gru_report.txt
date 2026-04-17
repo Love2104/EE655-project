@@ -1,0 +1,6 @@
+Architecture: gru
+Best val accuracy: 71.71%
+Test accuracy: 74.15%
+Test macro F1: 0.7370
+Best epoch: 15
+Overfitting gap: 27.87%

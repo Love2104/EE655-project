@@ -1,0 +1,7 @@
+Architecture: GRU
+Sampling strategy: hybrid
+Best val accuracy: 62.93%
+Test accuracy: 62.44%
+Test macro F1: 0.6203
+Best epoch: 15
+Overfitting gap: 32.60%

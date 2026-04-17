@@ -1,0 +1,6 @@
+Architecture: cnn_only
+Best val accuracy: 79.51%
+Test accuracy: 79.02%
+Test macro F1: 0.7838
+Best epoch: 13
+Overfitting gap: 16.23%
